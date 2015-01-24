@@ -23,25 +23,26 @@ LIB                     =       -L/lib
 .PHONY : all install uninstall clean purge test
 
 .c.o :
-	@echo "[+] CC $< -> $@"
+	@echo "[+] Compiling $< -> $@"
 	@$(CC) $(CFLAGS) -c -o $@ $<
 
-all :  gen-header $(BIN)
+all :  $(BIN).h $(BIN)
 
-gen-header:
-	@bash gen_bakassabl.h.sh > bakassabl.h
+$(BIN).h:
+	@echo "[+] Building $@"
+	@bash gen_bakassabl.h.sh > $@
 
 $(BIN): $(OBJECTS)
-	@echo "[+] LINK with $(LDFLAGS)"
+	@echo "[+] Liking with $(LDFLAGS)"
 	@$(CC) $(CFLAGS) -o $@ $(OBJECTS) $(LIB) $(LDFLAGS)
 
 clean:
-	@echo "[+] RM objects"
+	@echo "[+] Deleting objects"
 	@rm -fr $(OBJECTS) *core* *~ *.swp
 
 purge: clean
-	@echo "[+] RM $(BIN)"
-	@rm -fr $(BIN)
+	@echo "[+] Deleting $(BIN)"
+	@rm -fr $(BIN) $(BIN).h
 
 install: $(BIN)
 	install -s -m 755 -o root -g root -- ./$(BIN) /usr/local/bin/
@@ -49,7 +50,7 @@ install: $(BIN)
 uninstall: clean
 	rm -fr /usr/local/bin/$(BIN)
 
-test: clean all
+test: purge all
 	./$(BIN) --verbose --paranoid  -- /bin/ping -c 10 localhost
 	./$(BIN) --verbose --allow-all --deny connect -- /usr/bin/ncat -v4 localhost 22
 	./$(BIN) --verbose --allow-all --deny connect -- /bin/cat /etc/passwd

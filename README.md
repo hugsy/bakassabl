@@ -4,8 +4,10 @@ A (very) cheap Linux sandboxer based on seccomp
 
 ## Compile
 ```
+ $ make
+or manually
  $ ./gen_bakassabl.h.sh > bakassabl.h
- $ cc -o bakassabl -Werror -O1 -fPIE -fPIC -fstack-protector-all -Wl,-z,relro bakassabl.c -lseccomp -pie
+ $ cc -o bakassabl -Werror -O3 -fPIE -fPIC -fstack-protector-all -Wl,-z,relro bakassabl.c -lseccomp -pie
 ```
 
 
