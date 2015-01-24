@@ -14,6 +14,8 @@
  *
  * ToDo:
  * deny-all mode is not fully operational
+ * create group (ex: file=(open|read|write|close|stat|access), etc.)
+ * add argument filters
  */
 
 
@@ -183,7 +185,7 @@ static int add_rule(sandbox_mode_t m, const char* r)
 
 
 /**
- *
+ * Add black-listing rule
  */
 static int add_allow_rule(const char* rule)
 {
@@ -192,7 +194,7 @@ static int add_allow_rule(const char* rule)
 
 
 /**
- *
+ * Add white-listing rule
  */
 static int add_deny_rule(const char* rule)
 {

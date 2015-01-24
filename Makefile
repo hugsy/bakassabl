@@ -33,7 +33,7 @@ $(BIN).h:
 	@bash gen_bakassabl.h.sh > $@
 
 $(BIN): $(OBJECTS)
-	@echo "[+] Liking with $(LDFLAGS)"
+	@echo "[+] Linking with $(LDFLAGS)"
 	@$(CC) $(CFLAGS) -o $@ $(OBJECTS) $(LIB) $(LDFLAGS)
 
 clean:
