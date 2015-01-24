@@ -4,8 +4,7 @@
  * @_hugsy_
  *
  * Compile:
- * $ ./gen_bakassabl.h.sh > bakassabl.h
- * $ cc -o bakassabl -Werror -O1 -fPIE -fPIC -fstack-protector-all -Wl,-z,relro bakassabl.c -lseccomp -pie
+ * $ make
  *
  * Examples:
  * $ ./bakassabl --verbose --paranoid  -- /bin/ping -c 10 localhost
@@ -29,8 +28,13 @@
 
 #include "bakassabl.h"
 
+#ifndef PROGNAME
 #define PROGNAME "bakassabl"
+#endif
+
+#ifndef AUTHOR
 #define AUTHOR "@_hugsy_"
+#endif
 
 typedef enum {
         false,
