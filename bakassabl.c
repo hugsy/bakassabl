@@ -4,12 +4,17 @@
  * @_hugsy_
  *
  * Compile:
- * $ cc -o bakassabl -Werror -O3 -fPIE -fPIC -fstack-protector-all -Wl,-z,relro bakassabl.c -lseccomp -pie
+ * $ ./gen_bakassabl.h.sh > bakassabl.h
+ * $ cc -o bakassabl -Werror -O1 -fPIE -fPIC -fstack-protector-all -Wl,-z,relro bakassabl.c -lseccomp -pie
  *
  * Examples:
  * $ ./bakassabl --verbose --paranoid  -- /bin/ping -c 10 localhost
  * $ ./bakassabl --verbose --allow-all --deny connect -- /usr/bin/ncat -v4 localhost 22
+ * $ ./bakassabl --verbose --allow-all --deny connect -- /bin/cat /etc/passwd
  * $ ./bakassabl --verbose --deny-all  --allow exit -- ./myexit
+ *
+ * ToDo:
+ * deny-all mode is not fully operational
  */
 
 
@@ -19,9 +24,13 @@
 #include <seccomp.h>
 #include <errno.h>
 #include <unistd.h>
+#include <string.h>
 #include <sys/prctl.h>
 
+#include "bakassabl.h"
+
 #define PROGNAME "bakassabl"
+#define AUTHOR "@_hugsy_"
 
 typedef enum {
         false,
@@ -39,6 +48,25 @@ typedef enum {
 scmp_filter_ctx ctx = NULL;
 sandbox_mode_t mode = UNDEFINED;
 int verbose = 0;
+
+
+/**
+ *
+ */
+static int _lookup_syscall(const char* name)
+{
+        syscall_t *sc;
+
+        for(sc=syscall_table; sc->syscall_name && sc->syscall_num>-1 ; sc++){
+                if (strcmp(name, sc->syscall_name) == 0){
+                        if (verbose)
+                                printf("[+] found syscall '%s' as %d\n", sc->syscall_name, sc->syscall_num);
+                        return sc->syscall_num;
+                }
+        }
+
+        return -1;
+}
 
 
 /**
@@ -65,8 +93,17 @@ static int _init_seccomp(uint32_t seccomp_type)
                 return -1;
         }
 
+        return 0;
+}
+
+
+/**
+ *
+ */
+static int apply_seccomp()
+{
         if ( seccomp_load(ctx) < 0){
-                perror("[_init_seccomp] failed loading context");
+                perror("[apply_seccomp] failed loading current context");
                 return -1;
         }
 
@@ -111,21 +148,31 @@ static int init_mode(sandbox_mode_t type)
 /**
  *
  */
-static int add_allow_rule(const char* rule)
+static int add_rule(sandbox_mode_t m, const char* r)
 {
-        if (mode != SECCOMP_BLOCK) {
-                printf("invalid mode, cannot proceed\n");
+        int sc_num = -1;
+
+        if (mode != m) {
+                printf("[-] invalid mode, cannot proceed\n");
                 return -1;
         }
 
-        if ( seccomp_rule_add(ctx, SCMP_ACT_ALLOW, SCMP_SYS(connect), 0) < 0) {
+        sc_num = _lookup_syscall(r);
+        if ( sc_num < 0 ){
+                printf("[-] failed to find syscall '%s' (typo?)\n", r);
+                return -1;
+        }
+
+        if ( seccomp_rule_add(ctx, (m==SECCOMP_BLOCK?SCMP_ACT_ALLOW:SCMP_ACT_KILL), sc_num, 0) < 0) {
                 perror("[add_allow_rule] failed adding rule");
                 return -1;
         }
 
-        if (verbose)
-                printf("[+] allowing '%s'\n", rule);
-
+        if (verbose) {
+                printf("[+] %s '%s'\n",
+                       m==SECCOMP_BLOCK?"allowing":"denying",
+                       r);
+        }
 
         return 0;
 }
@@ -134,22 +181,20 @@ static int add_allow_rule(const char* rule)
 /**
  *
  */
+static int add_allow_rule(const char* rule)
+{
+        return add_rule(SECCOMP_BLOCK, rule);
+}
+
+
+
+
+/**
+ *
+ */
 static int add_deny_rule(const char* rule)
 {
-        if (mode != SECCOMP_PERMIT) {
-                printf("invalid mode, cannot proceed\n");
-                return -1;
-        }
-
-        if ( seccomp_rule_add(ctx, SCMP_ACT_KILL, SCMP_SYS(connect), 0) < 0) {
-                perror("[add_deny_rule] failed adding rule");
-                return -1;
-        }
-
-        if (verbose)
-                printf("[+] denying '%s'\n", rule);
-
-        return 0;
+        return add_rule(SECCOMP_PERMIT, rule);
 }
 
 
@@ -165,7 +210,7 @@ static int release_sandbox()
 
 
 /**
- *
+ * Usage function
  */
 static int usage(int retcode)
 {
@@ -173,15 +218,35 @@ static int usage(int retcode)
 	fd = (retcode == EXIT_SUCCESS) ? stdout : stderr;
 
 	fprintf(fd,
-                "SYNTAX:\n"
+                "%s (for %s) - written by %s\n"
+                "\n"
+                "Syntax:\n"
                 "%s --allow-all [--deny privilege]* -- /path/to/my/program [--prog-arg]*\n"
                 "\tor\n"
                 "%s --deny-all  [--allow privilege]* -- /path/to/my/program [--prog-arg]*\n"
                 "\tor\n"
                 "%s --paranoid -- /path/to/my/program [--prog-arg]*\n",
+                PROGNAME, arch, AUTHOR,
                 PROGNAME, PROGNAME, PROGNAME );
 
         return retcode;
+}
+
+
+/**
+ * Enumerate syscalls for the current architecture
+ */
+static void list_syscalls()
+{
+        syscall_t *sc;
+        printf("Syscall list downloaded from:\n");
+        printf("[+] %s\n", syslist_src);
+
+        printf("Supported syscalls for %s:\n", arch);
+        for(sc=syscall_table; sc->syscall_name && sc->syscall_num>-1 ; sc++){
+                printf("[+] %d : '%s'\n", sc->syscall_num, sc->syscall_name);
+        }
+        return;
 }
 
 
@@ -198,8 +263,9 @@ int main(int argc, char** argv, char** envp)
 
         struct option long_opts[] = {
 		{ "help",       no_argument, 0, 'h' },
-		{ "verbose",    no_argument, 0, 'v' },
-                { "quiet",    no_argument, 0, 'q' },
+                { "list",       no_argument, 0, 'l' },
+                { "verbose",    no_argument, 0, 'v' },
+                { "quiet",      no_argument, 0, 'q' },
 
                 { "allow-all",  no_argument, 0, 'A' },
                 { "deny",       required_argument, 0, 'd' },
@@ -214,7 +280,7 @@ int main(int argc, char** argv, char** envp)
 
         while (1) {
 		curopt_idx = 0;
-                curopt = getopt_long (argc,argv,"Ad:Da:Phvq",long_opts, &curopt_idx);
+                curopt = getopt_long (argc,argv,"Ad:Da:Phvql",long_opts, &curopt_idx);
 		if (curopt == -1)
                         break;
 
@@ -261,6 +327,10 @@ int main(int argc, char** argv, char** envp)
                                 break;
 
 
+                        case 'l':
+                                list_syscalls();
+                                return EXIT_SUCCESS;
+
                         case 'v':
                                 verbose++;
                                 break;
@@ -297,6 +367,9 @@ int main(int argc, char** argv, char** envp)
                         printf (" %s", argv[i]);
                 printf("'\n");
         }
+
+        if (mode != UNDEFINED && mode != PARANOID)
+                apply_seccomp();
 
         if (execve(bin, args, envp) < 0)
                 perror("execve");
