@@ -10,11 +10,28 @@ A (very) cheap Linux sandboxer based on seccomp
 
 
 ##  Examples
+
+Given commands are equivalent.
+
+### No more privilege
 ```
  $ ./bakassabl --verbose --paranoid  -- /bin/ping -c 10 localhost
+or
+ $ ./bakassabl -v -P -- /bin/ping -c 10 localhost
+```
+
+### Black-listing syscalls
+```
  $ ./bakassabl --verbose --allow-all --deny connect -- /usr/bin/ncat -v4 localhost 22
- $ ./bakassabl --verbose --allow-all --deny connect -- /bin/cat /etc/passwd
+or
+ $ ./bakassabl -v -A -d connect -- /usr/bin/ncat -v4 localhost 22
+```
+
+### White-listing syscalls
+```
  $ ./bakassabl --verbose --deny-all  --allow exit -- ./myexit
+or
+ $ ./bakassabl -v -D -a exit -- ./myexit
 ```
 
 ## ToDo
