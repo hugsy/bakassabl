@@ -187,8 +187,6 @@ static int add_allow_rule(const char* rule)
 }
 
 
-
-
 /**
  *
  */
