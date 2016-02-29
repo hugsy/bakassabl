@@ -13,8 +13,8 @@
  * $ ./bakassabl --verbose --deny-all  --allow exit -- ./myexit
  *
  * ToDo:
- * create group (ex: file=(open|read|write|close|stat|access), etc.)
- * add argument filters
+ * add more groups
+ * better argument filters
  */
 
 
@@ -58,7 +58,38 @@ sandbox_mode_t mode = UNDEFINED;
 int verbose = 0;
 bool_t gentle_mode = false;
 
+typedef struct _group_t {
+        char* name;
+        const char* syscalls[];
+} group_t;
 
+const group_t group_file = {
+        .name ="file",
+        .syscalls = {"open", "stat","chmod", "unlink", "lstat", "close", "creat", "read", "write", "access", NULL }
+};
+
+const group_t group_dir = {
+        .name="dir",
+        .syscalls={"open", "mkdir", "rmdir", "close", "chdir", "readdir", NULL}
+};
+
+const group_t group_net = {
+        .name = "net",
+        .syscalls = {"open", "socket", "connect", "close", "read", "write", NULL}
+};
+
+const group_t group_mem = {
+        .name = "memory",
+        .syscalls = {"mmap", "brk", "mprotect", "munmap", "read", "write", NULL}
+};
+
+const group_t* groups[] = {
+        &group_file,
+        &group_dir,
+        &group_net,
+        &group_mem,
+        NULL
+};
 
 
 /**
@@ -77,6 +108,23 @@ static int _lookup_syscall(const char* name)
         }
 
         return -1;
+}
+
+
+/**
+ *
+ */
+static group_t* _lookup_group(const char* name)
+{
+        group_t **g;
+
+        for (g=(group_t**)groups; *g; g++){
+
+                if (strcmp((*g)->name, name)==0)
+                        return (*g);
+        }
+
+        return NULL;
 }
 
 
@@ -109,7 +157,7 @@ static int _init_seccomp(uint32_t seccomp_type)
 
 
 /**
- *
+ * Apply the seccomp context to the current process structure.
  */
 static int apply_seccomp()
 {
@@ -123,7 +171,7 @@ static int apply_seccomp()
 
 
 /**
- *
+ * Initialize the seccomp sandboxing context.
  */
 static int init_mode(sandbox_mode_t type)
 {
@@ -182,14 +230,44 @@ static int add_rule(int mode, const char* r, unsigned int cnt, struct scmp_arg_c
 
 
 /**
+ * Add a group rule
+ */
+static int add_rules(int mode, const char* r, unsigned int cnt, struct scmp_arg_cmp *args)
+{
+        group_t* group;
+        char** sc;
+
+        if (strncmp(r, "group=", 6)!=0){
+                return add_rule(mode, r, cnt, args);
+        }
+
+        group = _lookup_group( r+6 );
+        if (!group){
+                return -1;
+        }
+
+        for(sc=(char**)&(group->syscalls); *sc; sc++){
+                if (add_rule(mode, *sc, cnt, args) < 0){
+                        return -1;
+                }
+        }
+
+        return 0;
+}
+
+
+/**
  * Add black-listing rule
  */
 static int add_simple_allow_rule(const char* scname)
 {
+        if (add_rules(SCMP_ACT_ALLOW, scname, 0, NULL) < 0)
+                return -1;
+
         if (verbose)
                 printf("[+] Allowing '%s'\n", scname);
 
-        return add_rule(SCMP_ACT_ALLOW, scname, 0, NULL);
+        return 0;
 }
 
 
@@ -198,10 +276,13 @@ static int add_simple_allow_rule(const char* scname)
  */
 static int add_simple_deny_rule(const char* scname)
 {
+        if(add_rules(SCMP_ACT_KILL, scname, 0, NULL)<0)
+                return -1;
+
         if (verbose)
                 printf("[+] Denying '%s'\n", scname);
 
-        return add_rule(SCMP_ACT_KILL, scname, 0, NULL);
+        return 0;
 }
 
 
@@ -239,7 +320,7 @@ static int set_fuzz_mode()
                 uint16_t random_value = rand() % ((1<<16)-1);
 
                 if (verbose)
-                        printf("[+] '%s()' -> #%d\n", sc->syscall_name, sc->syscall_num);
+                        printf("[+] '%s()' #%d returns %d\n", sc->syscall_name, sc->syscall_num, random_value);
 
                 seccomp_rule_add_array(ctx,
                                        SCMP_ACT_ERRNO(random_value),
@@ -273,11 +354,12 @@ static int usage(int retcode)
                 "%1$s (for %2$s) - written by %3$s\n"
                 "\n"
                 "Syntax:\n"
-                "%1$s --allow-all [--deny privilege]* -- /path/to/my/program [--prog-arg]*\n"
+                "%1$s --allow-all [--deny privilege]* [--no-internet] -- /path/to/my/program [--prog-arg]*\n"
                 "or\n"
                 "%1$s --deny-all  [--allow privilege]* -- /path/to/my/program [--prog-arg]*\n"
                 "or\n"
                 "%1$s --paranoid -- /path/to/my/program [--prog-arg]*\n"
+                "Where privilege can be a syscall (i.e. socket, exit, open), or a group (i.e. group=net,group=mem)\n"
                 "\nList syscalls: "
                 "%1$s --list-syscalls\n"
                 ,
