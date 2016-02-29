@@ -30,7 +30,7 @@ all :  $(BIN).h $(BIN)
 
 $(BIN).h:
 	@echo "[+] Building $@"
-	@bash gen_bakassabl.h.sh > $@
+	@bash generate_header_file.sh > $@
 
 $(BIN): $(OBJECTS)
 	@echo "[+] Linking with $(LDFLAGS)"

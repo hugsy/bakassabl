@@ -38,6 +38,8 @@
 #define AUTHOR "@_hugsy_"
 #endif
 
+
+
 typedef enum {
         false,
         true
@@ -56,6 +58,7 @@ sandbox_mode_t mode = UNDEFINED;
 int verbose = 0;
 
 
+
 /**
  *
  */
@@ -66,7 +69,7 @@ static int _lookup_syscall(const char* name)
         for(sc=syscall_table; sc->syscall_name && sc->syscall_num>-1 ; sc++){
                 if (strcmp(name, sc->syscall_name) == 0){
                         if (verbose)
-                                printf("[+] found syscall '%s' as %d\n", sc->syscall_name, sc->syscall_num);
+                                printf("[+] Found syscall '%s' as %d\n", sc->syscall_name, sc->syscall_num);
                         return sc->syscall_num;
                 }
         }
@@ -81,7 +84,7 @@ static int _lookup_syscall(const char* name)
 static int _init_nnp()
 {
         if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)) {
-                perror("[_init_nnp] failed prctl");
+                perror("[_init_nnp] Failed prctl");
                 return -1;
         }
         return 0;
@@ -95,7 +98,7 @@ static int _init_seccomp(uint32_t seccomp_type)
 {
         ctx = seccomp_init(seccomp_type);
         if (!ctx) {
-                perror("[_init_seccomp] failed to init default rule");
+                perror("[_init_seccomp] Failed to init default rule");
                 return -1;
         }
 
@@ -109,7 +112,7 @@ static int _init_seccomp(uint32_t seccomp_type)
 static int apply_seccomp()
 {
         if ( seccomp_load(ctx) < 0){
-                perror("[apply_seccomp] failed loading current context");
+                perror("[apply_seccomp] Failed loading current context");
                 return -1;
         }
 
@@ -132,17 +135,17 @@ static int init_mode(sandbox_mode_t type)
         switch(mode) {
                 case PARANOID:
                         if (verbose)
-                                printf("[+] enabling PARANOID mode\n");
+                                printf("[+] Enabling PARANOID mode\n");
                         return _init_nnp();
 
                 case SECCOMP_PERMIT:
                         if (verbose)
-                                printf("[+] enabling PERMIT as default mode\n");
+                                printf("[+] Enabling PERMIT as default mode\n");
                         return _init_seccomp(SCMP_ACT_ALLOW);
 
                 case SECCOMP_BLOCK:
                         if (verbose)
-                                printf("[+] enabling BLOCK as default mode\n");
+                                printf("[+] Enabling BLOCK as default mode\n");
                         return _init_seccomp(SCMP_ACT_KILL);
 
                 default:
@@ -154,30 +157,19 @@ static int init_mode(sandbox_mode_t type)
 /**
  *
  */
-static int add_rule(sandbox_mode_t m, const char* r)
+static int add_rule(int mode, const char* r, unsigned int cnt, struct scmp_arg_cmp *args)
 {
         int sc_num = -1;
 
-        if (mode != m) {
-                printf("[-] invalid mode, cannot proceed\n");
-                return -1;
-        }
-
         sc_num = _lookup_syscall(r);
         if ( sc_num < 0 ){
-                printf("[-] failed to find syscall '%s' (typo?)\n", r);
+                printf("[-] Failed to find syscall '%s' (typo?)\n", r);
                 return -1;
         }
 
-        if ( seccomp_rule_add(ctx, (m==SECCOMP_BLOCK?SCMP_ACT_ALLOW:SCMP_ACT_KILL), sc_num, 0) < 0) {
-                perror("[add_allow_rule] failed adding rule");
+        if ( seccomp_rule_add_array(ctx, mode, sc_num, cnt, args) < 0) {
+                perror("[add_allow_rule] Failed adding rule");
                 return -1;
-        }
-
-        if (verbose) {
-                printf("[+] %s '%s'\n",
-                       m==SECCOMP_BLOCK?"allowing":"denying",
-                       r);
         }
 
         return 0;
@@ -187,18 +179,40 @@ static int add_rule(sandbox_mode_t m, const char* r)
 /**
  * Add black-listing rule
  */
-static int add_allow_rule(const char* rule)
+static int add_simple_allow_rule(const char* scname)
 {
-        return add_rule(SECCOMP_BLOCK, rule);
+        if (verbose)
+                printf("[+] Allowing '%s'\n", scname);
+
+        return add_rule(SCMP_ACT_ALLOW, scname, 0, NULL);
 }
 
 
 /**
  * Add white-listing rule
  */
-static int add_deny_rule(const char* rule)
+static int add_simple_deny_rule(const char* scname)
 {
-        return add_rule(SECCOMP_PERMIT, rule);
+        if (verbose)
+                printf("[+] Denying '%s'\n", scname);
+
+        return add_rule(SCMP_ACT_KILL, scname, 0, NULL);
+}
+
+/**
+ * Add black-listing rule to block calls to socket(AF_INET, ...)
+ */
+static int add_no_internet_rule()
+{
+        // AF_INET = PF_INET = 2
+        struct scmp_arg_cmp args[] = {
+                SCMP_A0(SCMP_CMP_EQ, 2)
+        };
+
+        if (verbose)
+                printf("[+] Denying 'socket(AF_INET, ...)'\n");
+
+        return add_rule(SCMP_ACT_KILL, "socket", 1, args);
 }
 
 
@@ -222,16 +236,18 @@ static int usage(int retcode)
 	fd = (retcode == EXIT_SUCCESS) ? stdout : stderr;
 
 	fprintf(fd,
-                "%s (for %s) - written by %s\n"
+                "%1$s (for %2$s) - written by %3$s\n"
                 "\n"
                 "Syntax:\n"
-                "%s --allow-all [--deny privilege]* -- /path/to/my/program [--prog-arg]*\n"
-                "\tor\n"
-                "%s --deny-all  [--allow privilege]* -- /path/to/my/program [--prog-arg]*\n"
-                "\tor\n"
-                "%s --paranoid -- /path/to/my/program [--prog-arg]*\n",
-                PROGNAME, arch, AUTHOR,
-                PROGNAME, PROGNAME, PROGNAME );
+                "%1$s --allow-all [--deny privilege]* -- /path/to/my/program [--prog-arg]*\n"
+                "or\n"
+                "%1$s --deny-all  [--allow privilege]* -- /path/to/my/program [--prog-arg]*\n"
+                "or\n"
+                "%1$s --paranoid -- /path/to/my/program [--prog-arg]*\n"
+                "\nList syscalls: "
+                "%1$s --list-syscalls\n"
+                ,
+                PROGNAME, arch, AUTHOR);
 
         return retcode;
 }
@@ -243,11 +259,11 @@ static int usage(int retcode)
 static void list_syscalls()
 {
         syscall_t *sc;
-        printf("Syscall list downloaded from:\n");
+        printf("System calls list downloaded from:\n");
         printf("[+] %s\n", syslist_src);
 
         printf("Supported syscalls for %s:\n", arch);
-        for(sc=syscall_table; sc->syscall_name && sc->syscall_num>-1 ; sc++){
+        for(sc=syscall_table; sc->syscall_name && sc->syscall_num>-1 ; sc++) {
                 printf("[+] %d : '%s'\n", sc->syscall_num, sc->syscall_name);
         }
         return;
@@ -266,25 +282,27 @@ int main(int argc, char** argv, char** envp)
         bool_t do_loop = true;
 
         struct option long_opts[] = {
-		{ "help",       no_argument, 0, 'h' },
-                { "list",       no_argument, 0, 'l' },
-                { "verbose",    no_argument, 0, 'v' },
-                { "quiet",      no_argument, 0, 'q' },
+		{ "help",                no_argument, 0, 'h' },
+                { "list-syscalls",       no_argument, 0, 'l' },
+                { "verbose",             no_argument, 0, 'v' },
+                { "quiet",               no_argument, 0, 'q' },
 
-                { "allow-all",  no_argument, 0, 'A' },
-                { "deny",       required_argument, 0, 'd' },
+                { "allow-all",           no_argument, 0, 'A' },
+                { "deny",                required_argument, 0, 'd' },
+                { "no-internet",         no_argument, 0, 'i' },
 
-                { "deny-all",   no_argument, 0, 'D' },
-                { "allow",      required_argument, 0, 'a' },
+                { "deny-all",            no_argument, 0, 'D' },
+                { "allow",               required_argument, 0, 'a' },
 
-                { "paranoid",   no_argument, 0, 'P' },
+                { "paranoid",            no_argument, 0, 'P' },
 
 		{ 0, 0, 0, 0 }
 	};
 
+
         while (1) {
 		curopt_idx = 0;
-                curopt = getopt_long (argc,argv,"Ad:Da:Phvql",long_opts, &curopt_idx);
+                curopt = getopt_long (argc,argv,"Aid:Da:Phvql",long_opts, &curopt_idx);
 		if (curopt == -1)
                         break;
 
@@ -303,15 +321,23 @@ int main(int argc, char** argv, char** envp)
                                 }
                                 break;
                         case 'd':
-                                if (mode == UNDEFINED){
-                                        printf("[-] A mode MUST be defined first\n");
+                                if (mode != SECCOMP_PERMIT){
+                                        printf("[-] Invalid mode\n");
                                         return EXIT_FAILURE;
                                 }
 
-                                ret = add_deny_rule(optarg);
+                                ret = add_simple_deny_rule(optarg);
                                 if (ret < 0)
                                         goto out;
                                 break;
+                        case 'i':
+                                if (mode != SECCOMP_PERMIT){
+                                        printf("[-] Invalid mode\n");
+                                        return EXIT_FAILURE;
+                                }
+                                add_no_internet_rule();
+                                break;
+
 
                         case 'D':
                                 ret = init_mode(SECCOMP_BLOCK);
@@ -320,12 +346,12 @@ int main(int argc, char** argv, char** envp)
                                 }
                                 break;
                         case 'a':
-                                if (mode == UNDEFINED){
-                                        printf("[-] A mode MUST be defined first\n");
+                                if (mode != SECCOMP_BLOCK){
+                                        printf("[-] Invalid mode\n");
                                         return EXIT_FAILURE;
                                 }
 
-                                ret = add_allow_rule(optarg);
+                                ret = add_simple_allow_rule(optarg);
                                 if (ret < 0)
                                         goto out;
                                 break;
@@ -353,12 +379,12 @@ int main(int argc, char** argv, char** envp)
         }
 
         if (mode == UNDEFINED) {
-                printf("[-] no mode selected\n");
+                printf("[-] No mode selected\n");
                 goto out;
         }
 
         if (optind == argc) {
-                printf("[-] missing executable\n");
+                printf("[-] Missing executable\n");
                 goto out;
         }
 
@@ -366,7 +392,7 @@ int main(int argc, char** argv, char** envp)
         args = &argv[optind];
 
         if (verbose){
-                printf ("[+] starting '%s", bin);
+                printf ("[+] Starting '%s", bin);
                 for (int i=optind+1; i<argc; i++)
                         printf (" %s", argv[i]);
                 printf("'\n");

@@ -4,10 +4,10 @@ arch="`/usr/bin/arch`"
 tmp="`/bin/mktemp`"
 
 if [ ${arch} = "x86_64" ]; then
-    src="https://raw.githubusercontent.com/torvalds/linux/master/arch/x86/syscalls/syscall_64.tbl"
+    src="https://raw.githubusercontent.com/torvalds/linux/master/arch/x86/entry/syscalls/syscall_64.tbl"
     /usr/bin/curl -s ${src} | /bin/egrep -v '^(#|$)' | /bin/egrep -v 'x32' > ${tmp}
 elif [ ${arch} = "i686" ]; then
-    src="https://raw.githubusercontent.com/torvalds/linux/master/arch/x86/syscalls/syscall_32.tbl"
+    src="https://raw.githubusercontent.com/torvalds/linux/master/arch/x86/entry/syscalls/syscall_32.tbl"
     /usr/bin/curl -s ${src} | /bin/egrep -v '^(#|$)' | /bin/egrep '(common|i386)' > ${tmp}
 else
     exit 1
