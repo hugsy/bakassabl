@@ -13,7 +13,6 @@
  * $ ./bakassabl --verbose --deny-all  --allow exit -- ./myexit
  *
  * ToDo:
- * deny-all mode is not fully operational
  * create group (ex: file=(open|read|write|close|stat|access), etc.)
  * add argument filters
  */
@@ -27,6 +26,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <sys/prctl.h>
+#include <time.h>
 
 #include "bakassabl.h"
 
@@ -41,7 +41,7 @@
 
 
 typedef enum {
-        false,
+        false = 0,
         true
 } bool_t;
 
@@ -56,6 +56,8 @@ typedef enum {
 scmp_filter_ctx ctx = NULL;
 sandbox_mode_t mode = UNDEFINED;
 int verbose = 0;
+bool_t gentle_mode = false;
+
 
 
 
@@ -167,6 +169,9 @@ static int add_rule(int mode, const char* r, unsigned int cnt, struct scmp_arg_c
                 return -1;
         }
 
+        if (mode==SCMP_ACT_KILL && gentle_mode)
+                mode = SCMP_ACT_ERRNO((uint16_t) -1);
+
         if ( seccomp_rule_add_array(ctx, mode, sc_num, cnt, args) < 0) {
                 perror("[add_allow_rule] Failed adding rule");
                 return -1;
@@ -199,6 +204,7 @@ static int add_simple_deny_rule(const char* scname)
         return add_rule(SCMP_ACT_KILL, scname, 0, NULL);
 }
 
+
 /**
  * Add black-listing rule to block calls to socket(AF_INET, ...)
  */
@@ -213,6 +219,34 @@ static int add_no_internet_rule()
                 printf("[+] Denying 'socket(AF_INET, ...)'\n");
 
         return add_rule(SCMP_ACT_KILL, "socket", 1, args);
+}
+
+
+/**
+ * Enable syscall fuzz mode: return a random value between [0, 2**16[
+ * for all syscalls
+ */
+static int set_fuzz_mode()
+{
+        syscall_t *sc;
+
+        if (verbose)
+                printf("[+] Initializating fuzz mode'\n");
+
+        srand(time(NULL));
+
+        for(sc=syscall_table; sc->syscall_name && sc->syscall_num>-1 ; sc++){
+                uint16_t random_value = rand() % ((1<<16)-1);
+
+                if (verbose)
+                        printf("[+] '%s()' -> #%d\n", sc->syscall_name, sc->syscall_num);
+
+                seccomp_rule_add_array(ctx,
+                                       SCMP_ACT_ERRNO(random_value),
+                                       sc->syscall_num, 0, NULL);
+        }
+
+        return 0;
 }
 
 
@@ -285,11 +319,12 @@ int main(int argc, char** argv, char** envp)
 		{ "help",                no_argument, 0, 'h' },
                 { "list-syscalls",       no_argument, 0, 'l' },
                 { "verbose",             no_argument, 0, 'v' },
-                { "quiet",               no_argument, 0, 'q' },
+                { "gentle",              no_argument, 0, 'g' },
 
                 { "allow-all",           no_argument, 0, 'A' },
                 { "deny",                required_argument, 0, 'd' },
                 { "no-internet",         no_argument, 0, 'i' },
+                { "fuzz-mode",           no_argument, 0, 'f' },
 
                 { "deny-all",            no_argument, 0, 'D' },
                 { "allow",               required_argument, 0, 'a' },
@@ -302,7 +337,7 @@ int main(int argc, char** argv, char** envp)
 
         while (1) {
 		curopt_idx = 0;
-                curopt = getopt_long (argc,argv,"Aid:Da:Phvql",long_opts, &curopt_idx);
+                curopt = getopt_long (argc,argv,"Aifd:Da:Phvgl",long_opts, &curopt_idx);
 		if (curopt == -1)
                         break;
 
@@ -337,6 +372,13 @@ int main(int argc, char** argv, char** envp)
                                 }
                                 add_no_internet_rule();
                                 break;
+                        case 'f':
+                                if (mode != SECCOMP_PERMIT){
+                                        printf("[-] Invalid mode\n");
+                                        return EXIT_FAILURE;
+                                }
+                                set_fuzz_mode();
+                                break;
 
 
                         case 'D':
@@ -365,8 +407,8 @@ int main(int argc, char** argv, char** envp)
                                 verbose++;
                                 break;
 
-                        case 'q':
-                                verbose = 0;
+                        case 'g':
+                                gentle_mode = true;
                                 break;
 
                         case 'h':

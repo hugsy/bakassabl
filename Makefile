@@ -45,7 +45,7 @@ purge: clean
 	@rm -fr $(BIN) $(BIN).h
 
 install: $(BIN)
-	install -s -m 755 -o root -g root -- ./$(BIN) /usr/local/bin/
+	install -s -m 0755 -o root -g root -- ./$(BIN) /usr/local/bin/
 
 uninstall: clean
 	rm -fr /usr/local/bin/$(BIN)
