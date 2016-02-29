@@ -19,6 +19,8 @@ INC                     =       -I/usr/include
 CFLAGS                  =       -Werror $(DEFINES) $(INC) $(CHARDEN) -O3
 LIB                     =       -L/lib
 
+BIN_INSTALL_DIR   	= 	/usr/local/bin
+
 
 .PHONY : all install uninstall clean purge test
 
@@ -45,10 +47,10 @@ purge: clean
 	@rm -fr $(BIN) $(BIN).h
 
 install: $(BIN)
-	install -s -m 0755 -o root -g root -- ./$(BIN) /usr/local/bin/
+	install -s -m 0755 -o root -g root -- ./$(BIN) $(BIN_INSTALL_DIR)
 
 uninstall: clean
-	rm -fr /usr/local/bin/$(BIN)
+	rm -fr $(BIN_INSTALL_DIR)/$(BIN)
 
 test: purge all
 	./$(BIN) --verbose --paranoid  -- /bin/ping -c 10 localhost
